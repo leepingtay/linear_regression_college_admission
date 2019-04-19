@@ -1,0 +1,417 @@
+################################################################################################
+ R Project on Linear Regression and Residual Analysis                                 
+
+ Last Revision: 04/18/2019
+
+ Author(s):
+ Lee Ping Tay - joylp.tay@gmail.com
+
+ 
+ Description:
+
+ Source of Data: 
+ The Integrated Postsecondary Education Data System (IPEDS) by the National Center for 
+ Education Statistics (NCES) in United States.
+ (https://nces.ed.gov/ipeds/datacenter/DataFiles.aspx)
+
+ Goal:
+ This R script is used to perform exploratory data analysis and data visualization on
+ higher eduacation data. Bar graphs on most expensive and least expensive colleges 
+ were created. Linear Regression and Residuals Analysis were conducted to identify
+ associations between Tuition Fees and Admission Rate.
+
+ Contents: 
+ Libraries and Environment
+ Data Import and Preprocessing
+ Data Manipulation (Merge dataframes)
+ Exploratory Data Analysis / Data Visualization
+ Linear Regression
+ Residuals analysis 
+ 
+###############################################################################################
+###############################################################################################
+ Libraries and Environment
+###############################################################################################
+
+```{r }
+library(tidyverse)
+library(RColorBrewer)
+```
+
+###############################################################################################
+ Data Import and Data Manipulation
+###############################################################################################
+ Import cvs file
+
+```{r }
+df_ipeds_data <- as.data.frame(read.csv("hd2017.csv"))
+```
+
+ Filter data on ipeds information
+
+```{r }
+df_ipeds <- df_ipeds_data %>%
+               select(UNITID, INSTNM, ADDR, CITY, STABBR, ZIP, CSA, COUNTYCD, 
+                      COUNTYNM, LONGITUD, LATITUDE, CONTROL)
+```
+
+dim(df_ipeds)   7153   12
+ Import Student charges for academic year programs
+
+```{r }
+tuitionfee <- as.data.frame(read_csv("ic2017_ay.csv"))
+```
+
+ Filter data on in-state tuition and fees 2017-18 (CHG2AY3) and
+ out-of-state tuition and fees 2017-18 (CHG3AY3)
+
+```{r }
+df_tuitionfee  <-  tuitionfee %>%
+                   select(UNITID, CHG2AY3, CHG3AY3) 
+```
+
+dim(df_tuitionfee)    4281    3
+ Import Admissions and Test Scores
+
+```{r }
+adm <- as.data.frame(read_csv("adm2017.csv"))
+```
+
+ Filter data on ADMSSN (total admissions), APPLCN (total applicants), ENRLT (total enrolled)
+
+```{r }
+df_admission  <- adm %>%
+                  select(UNITID, ADMSSN, APPLCN , ENRLT) 
+```
+
+dim(df_admission)  2075    4
+ import data on financial information
+
+```{r }
+cscore_all <- read.csv('Most-Recent-Cohorts-All-Data-Elements.csv')
+```
+
+dim(cscore_all)   7175 1899
+ filter data on debts, earnings, and tuition fee (in-state and out-of-state)
+
+```{r }
+fin_data <- cscore_all %>%
+            select(UNITID, GRAD_DEBT_MDN_SUPP, MD_EARN_WNE_P10, TUITIONFEE_IN, TUITIONFEE_OUT) %>%
+            mutate(MD_EARN_WNE_P10 = round(as.numeric(as.character(MD_EARN_WNE_P10))),
+                   GRAD_DEBT_MDN_SUPP = round(as.numeric(as.character(GRAD_DEBT_MDN_SUPP))),
+                   TUITIONFEE_IN = as.numeric(as.character(TUITIONFEE_IN)),
+                   TUITIONFEE_OUT = as.numeric(as.character(TUITIONFEE_OUT)))
+```
+
+ Import data on regions from github 
+
+```{r }
+regions <- read.csv("https://raw.githubusercontent.com/cphalpert/census-regions/master/us%20census%20bureau%20regions%20and%20divisions.csv")
+```
+
+###############################################################################################
+ Data Manipulation (Merge Dataframes)
+###############################################################################################
+1. Merge the data frame df_ipeds_main with the df_tuitiondfee data frame on UNITID
+
+```{r }
+df_ipeds_tuition <- merge(df_ipeds, df_tuitionfee, by = "UNITID", all.x = TRUE)
+```
+
+2. Merge the data frame IPEDS_merge_price_2017 with the adm_enroll2017 data frame on UNITID
+
+```{r }
+df_ipeds_tuiadm <- merge(df_ipeds_tuition, df_admission, by = "UNITID", all.x = TRUE)
+```
+
+2. Merge the data frame IPEDS_merge_price_2017 with the adm_enroll2017 data frame on UNITID
+
+```{r }
+df_ipeds_fin <- merge(df_ipeds_tuiadm, fin_data, by = "UNITID", all.x = TRUE)
+```
+
+4. Merge the data frame IPEDS_merge_adm_2017 with US Region(4) CW on STABBR
+
+```{r }
+df_ipeds_main <- merge(df_ipeds_fin, regions, by.x = "STABBR", by.y= "State.Code", all.x = TRUE)
+```
+
+dim(df_ipeds_main)   7153   24
+###############################################################################################
+ Exploratory Data Analysis / Data Visualization
+###############################################################################################
+class(df_ipeds_main$CHG2AY3)    "character"
+ Change the class of tuition fee data and filter data on public and private not-for-profit 
+ colleges
+
+```{r }
+df_ipeds_main1 <- df_ipeds_main %>%
+                  mutate(CHG2AY3 = as.numeric(CHG2AY3),
+                         CHG3AY3 = as.numeric(CHG3AY3)) %>%
+                  filter(!is.na(Region) & !is.na(CHG2AY3) & CONTROL !=3)
+```
+
+dim(df_ipeds_main1)   3011   24
+ Filter NA and calculate admission rate
+
+```{r }
+df_ipeds_adm <- df_ipeds_main1 %>%
+                filter(!is.na(ADMSSN) & !is.na(ENRLT)) %>%
+                mutate(adm_rate = round((ADMSSN/APPLCN)*100))
+```
+
+dim(df_ipeds_adm)   1705   25
+ Average admission rate
+mean(df_ipeds_adm$adm_rate)   67.25
+ Top 10 Most Expensive Colleges in the U.S. in 2018
+
+```{r }
+top10_high_tuitionfee <- df_ipeds_main1 %>%
+                         mutate(CHG2AY3 = as.numeric(CHG2AY3) ) %>%
+                         filter(!is.na(CHG2AY3)) %>%
+                         select(INSTNM, Region, CHG2AY3) %>%
+                         top_n(n=10, wt =CHG2AY3) %>% 
+                         arrange(-CHG2AY3) %>%
+                         mutate(INSTNM=as.factor(INSTNM)) %>%
+                         rename('School' = INSTNM,
+                                'In_State_TuitionFees' = CHG2AY3)
+```
+
+ Top 10 Least Expensive Colleges in the U.S. in 2018
+
+```{r }
+top10_low_tuitionfee <- df_ipeds_main1 %>%
+                        mutate(CHG2AY3 = as.numeric(CHG2AY3) ) %>%
+                        filter(!is.na(CHG2AY3)) %>%
+                        select(INSTNM, Region, CHG2AY3) %>%
+                        top_n(n=10, wt = -CHG2AY3) %>% 
+                        arrange(CHG2AY3) %>%
+                        mutate(INSTNM=as.factor(INSTNM)) %>%
+                        rename('School' = INSTNM,
+                               'In_State_TuitionFees' = CHG2AY3)
+```
+
+ Set common colors for regions
+
+```{r }
+dd <- union(top10_high_tuitionfee$Region,top10_low_tuitionfee$Region)
+dd.col <- brewer.pal(n=length(dd), name="Set3")
+names(dd.col)  <- dd
+```
+
+ Bar Graph for Top 10 Most Expensive Colleges in the U.S. in 2018
+
+```{r }
+ggplot(top10_high_tuitionfee, aes(x=reorder(School, In_State_TuitionFees), 
+                                  y=In_State_TuitionFees, fill=Region)) +
+  theme(panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  geom_col() + coord_flip() +
+  scale_fill_manual("Legend", values = dd.col) +
+  labs(title = "Top 10 Most Expensive Colleges in the U.S. in 2018") +
+  labs(x = "Name of College", y="In-State Tuition and Fees") +
+  labs(caption="Source: IPEDS")
+```
+
+ Bar Graph for Top 10 Least Expensive Colleges in the U.S. in 2018
+
+```{r }
+ggplot(top10_low_tuitionfee, aes(x=reorder(School, In_State_TuitionFees), 
+                                y=In_State_TuitionFees, fill =Region)) +
+  theme(panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  geom_col() + coord_flip() +
+  scale_fill_manual("Legend", values = dd.col) +
+  labs(title = "Top 10 Least Expensive Colleges in the U.S. in 2018") +
+  labs(x = "Name of College", y="In-State Tuition and Fees") +
+  labs(caption="Source: IPEDS")
+```
+
+###############################################################################################
+ Linear Regression
+###############################################################################################
+ fit the model
+
+```{r }
+plot(df_ipeds_adm$CHG2AY3 ~ df_ipeds_adm$adm_rate , xlab="Admission Rate", 
+     ylab="In-State Tuition and Fees", main="Tuition and Fees vs Admission Rate", 
+     col="blue")
+
+tuitionfit_adm <- lm(formula = df_ipeds_adm$CHG2AY3 ~ df_ipeds_adm$adm_rate)
+abline(tuitionfit_adm, col="red")
+```
+
+ report the result
+
+```{r }
+summary(tuitionfit_adm)
+```
+
+ r squared
+summary(tuitionfit_adm)$r.squared   0.09
+ coefficient of determination R^2 = 0.09
+ 9% of SST, squared variation in dependent variable, admission rate, 
+ is explained by the linear regression equation to predict the in-state tuition and fees,
+ the rest is error.
+ print p-value
+
+```{r }
+summary(tuitionfit_adm)$coef[,"Pr(>|t|)",drop=F]
+```
+
+                            Pr(>|t|)
+ (Intercept)             2.467593e-185
+ df_ipeds_adm$adm_rate   1.045081e-36
+ print coefficients for the linear model
+
+```{r }
+coefficients(tuitionfit_adm)
+```
+
+  (Intercept)      df_ipeds_adm$adm_rate 
+   37151.6746             -206.9259 
+ print the correlation coefficient
+
+```{r }
+cor(df_ipeds_adm$adm_rate, df_ipeds_adm$CHG2AY3)
+```
+
+ correlation coefficient r = -0.2996
+ the variables have negative linear relationship
+ 95% confident that the coefficients are in these ranges
+
+```{r }
+confint(tuitionfit_adm, level=0.95)
+```
+
+                            2.5 %       97.5 %
+  (Intercept)           34945.7030   39357.6461
+  df_ipeds_adm$adm_rate  -238.2401    -175.6118
+######################################################
+The final linear model is of the form:
+  y = 37151.6746  - 206.9259  * x
+#######################################################
+ ggplot (Earnings vs GPA Award) with colors and abline
+
+```{r }
+ggplot(df_ipeds_adm, aes(x = df_ipeds_adm$adm_rate, y = df_ipeds_adm$CHG2AY3,
+                               color = Region)) + geom_point() + 
+  theme(panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  ggtitle("College Tuition and Fees versus Admission Rate") + 
+  xlab("Admission Rate") + ylab("In-State Tuition and Fees") +
+ geom_abline(aes(slope= -238.2401, intercept = 34945.7030), size=1, color="orange") 
+```
+
+###############################################################################################
+ Residuals analysis 
+###############################################################################################
+  diagnostic plot
+  Plot the model information
+  par(mfrow = c(2, 2))
+
+```{r }
+plot(tuitionfit_adm, cex.lab = 1.5, cex.axis = 1.5, col="blue")
+```
+
+We must test these three assumptions after calculating the coefficients in the linear 
+regression equation using the residuals:
+  
+Residuals or errors are normally distributed
+Residuals or errors have a constant variance
+Residuals or errors are independent of one another (not relevant to our scenario)
+We use residual analysis to determine whether or not these conditions have been met.
+   Interpretation of the diagnostic plot
+1. Residuals vs Fitted - shows if residuals have non-linear patterns.
+   We examine if the residuals exhibit homoscedasticity or approximately constant 
+   variance across the predicted values of the dependent variable. In this plot,
+   Residuals are almost symmetrically distributed before observations pass 30000. 
+   But there is no distinctive pattern.
+2. Normal Q-Q - shows if residuals are normally distributed.
+   Residuals lined well on the dotted line except a few observations at the two ends.
+3. Scale-Location - shows if residuals are spread equally along the ranges of predictors.
+   The line is almost horizontal and residuals appear randomly spread.
+4. Residuals vs Leverage - find influential cases if any.
+   Cook's distance" measure the influence of each observation on the regression coefficients.
+   There is no influential case as we can barely see Cook’s distance lines (a red dashed line)
+   because almost all cases are well inside of the Cook’s distance lines.
+ obtain predicted and residual values (differences between each data point and linear model)
+
+```{r }
+df_ipeds_adm  <- df_ipeds_adm %>% 
+                  mutate(predicted = predict(tuitionfit_adm),
+                         residuals = residuals(tuitionfit_adm))
+```
+
+ df_ipeds_adm$predicted <-  predict(tuitionfit_adm)
+ df_ipeds_adm$residuals <-  residuals(tuitionfit_adm)
+
+```{r }
+df_ipeds_adm %>% select(CHG2AY3, predicted, residuals) %>% head()
+```
+
+ Normality
+ visually test the normality of the residuals
+
+```{r }
+hist(df_ipeds_adm$residuals, col="skyblue", xlab="Residuals", main="Distribution of Residuals")
+```
+
+ distribution is slightly skewed to the right
+ Scatterplot of Residuals versus Admission Rate
+
+```{r }
+plot(df_ipeds_adm$residuals, df_ipeds_adm$adm_rate, col="skyblue",
+     xlab="residuals", ylab="Admission Rate", main="Residuals versus Admission Rate")
+```
+
+ We can also use errors to look at Normality
+
+```{r }
+df_ipeds_adm <- df_ipeds_adm %>% 
+                 mutate(err=(CHG2AY3 - predicted) / CHG2AY3)
+
+plot(df_ipeds_adm$err, xlab = "Difference between actual and predicted tuition and fees", 
+     ylab="percentage change", main="Errors between Actual and Predicted Tuition and Fees", 
+     col="blue")
+```
+
+ Homoscedasticity or heteroscedastic 
+ visually test the constant variance assumption
+
+```{r }
+tuitionfitted_adm <- fitted(tuitionfit_adm)
+
+plot(tuitionfitted_adm, df_ipeds_adm$residuals, xlab="residuals", 
+     ylab="Predicted In-state Tuition and Fees", col="blue")
+```
+
+ The graph shows a slightly different vertical height across the point cloud.
+ Overall, residuals have constant variance across the predicted dependent variable,
+ Note: From the plots, we noticed a few admission rates with extreme value if compare to average
+       admission rate of 68% in the dataset
+ 136  - 2%  (Minerva Schools, CA)
+ 1078 - 22% (United States Merchant Marine Academy, NY)
+ 1290 - 3% (Curtis Institute of Music, PA)
+ggplot on predicted tuition and fees vs admission rate
+
+```{r }
+p1 <- ggplot(df_ipeds_adm, aes(x=adm_rate, y=CHG2AY3)) +
+```
+
+      geom_smooth(method = "lm", se = FALSE, color = "lightgrey") +  add the regression slope. adjust alpha to fade out connection lines
+      geom_segment(aes(xend=adm_rate, yend=predicted), alpha=.2) +  connect actual data point with predicted value
+      geom_point(aes(color=abs(residuals))) +  color mapped to abs(residuals)
+      scale_color_gradient2(low="blue", mid="white", high="red") +  color to use. highlight residuals(abs) made more red on actual values
+      guides(color=FALSE) +   color legend removed
+      geom_point(aes(y=predicted), shape=1) +  add the predicted value
+      theme_bw() +   add theme
+
+```{r }
+      ggtitle("Predicted College Tuition and Fees versus Admission Rate") + 
+      xlab("Admission Rate") + ylab("In-State Tuition and Fees")
+p1
+
+ggsave(filename = "predict_tuition_adm.png", p1, width = 7, height = 4, dpi = 300, 
+       units = "in", device='png')
+```
+
+ There is more red for extreme values of gpa award where the actual values are
+ greater than what is being predicted.
