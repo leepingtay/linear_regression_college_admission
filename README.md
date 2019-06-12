@@ -15,3 +15,5 @@ The analysis focuses on public and private not-for-profit colleges in the United
 
 #### Author
 Lee Ping Tay
+
+#### *Please leave a review or star the github repository if you like it. Thank you.
